@@ -19,3 +19,12 @@
 
 # Go workspace file
 go.work
+
+# Log files
+*.log
+
+# Executables
+actwo*
+
+# folders to act on
+chemotion/
