@@ -6,20 +6,22 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	api_gh "github.com/google/go-github/github"
 	ver_compare "github.com/hashicorp/go-version"
 )
 
-type Project struct {
-	Repository  *string
-	Location    *string
-	Environment string
-	Triggers    []string
+type Project struct { // alphabetical order
+	Cleanup     []string `mapstructure:"cleanup"`
+	Commands    []string `mapstructure:"commands"`
+	Environment string   `mapstructure:"environment"`
+	Location    *string  `mapstructure:"location"`
+	Repository  *string  `mapstructure:"repository"`
+	Triggers    []string `mapstructure:"triggers"`
 }
 
 func getLatest(what string, p *Project) (answer string, err error) {
-	client := api_gh.NewClient(nil)
 	owner_repo := strings.Split(*p.Repository, "/")
 	var releases []*api_gh.RepositoryRelease
 	var options api_gh.ListOptions
@@ -117,7 +119,15 @@ func checkProject() {
 		default:
 			err = fmt.Errorf("ignored unknown trigger type %s", trigger)
 		}
-		if err == nil {
+		if err != nil {
+			if strings.Contains(err.Error(), "429 You have triggered an abuse detection mechanism.") {
+				logger.Error(spf("Error getting latest %s for %s: %s. Sleeping for %s...", trigger, project, err.Error(), defaultSleepMinutes.String()))
+				time.Sleep(defaultSleepMinutes) // sleep for defaultSleepMinutes minutes
+			} else {
+				logger.Error(spf("Error getting latest %s for %s: %s", trigger, project, err.Error()))
+			}
+			continue
+		} else {
 			// compare the values; if the comparison is true, run the project
 			logger.Debug(spf("Comparing %s for %s: %s vs %s...", trigger, project, oldValue, newValue))
 			if runIt, err = shouldRun(trigger, oldValue, newValue); !runIt {
@@ -138,9 +148,19 @@ func checkProject() {
 							logger.Error(spf("Error writing environment file: %s", err.Error()))
 						} else {
 							if err = execBlock(project); err != nil {
+								// if _, err = fmt.Println(newValue); err != nil {
 								logger.Error(spf("Error running trigger called %s for project %s: %s", trigger, project, err.Error()))
 							} else {
 								logger.Info(spf("Ran trigger called %s for %s successfully.", trigger, project))
+								// replace the existing entry from triggers
+								for i, t := range p.Triggers {
+									if t == spf("%s=%s", trigger, oldValue) {
+										p.Triggers[i] = spf("%s=%s", trigger, newValue)
+									}
+								}
+								// write the new configuration
+								conf.Set("projects."+project, p)
+								logger.Debug(spf("Updated triggers for %s.", project))
 							}
 						}
 						logger.Debug(spf("Changing back to %s...", pwd))

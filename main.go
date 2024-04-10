@@ -41,6 +41,7 @@ import (
 	"time"
 
 	"github.com/chigopher/pathlib"
+	api_gh "github.com/google/go-github/github"
 	"github.com/spf13/viper"
 )
 
@@ -52,7 +53,7 @@ const (
 	// version for config file that is created by this version of the application
 	confVersion = "1.0"
 	// defaultSleepMinutes is the default sleep time in minutes
-	defaultSleepMinutes = 5
+	defaultSleepMinutes = 5 * time.Minute
 )
 
 var (
@@ -70,6 +71,8 @@ var (
 	project string
 	// is it running
 	running bool
+	// client for the github API
+	client *api_gh.Client = api_gh.NewClient(nil)
 )
 
 /*
@@ -146,7 +149,7 @@ func main() {
 						for { // empty sigs infinitely
 							s := <-sigs
 							if s == syscall.SIGHUP {
-								logger.Info(fmt.Sprintf("Ignoring %s signal.  PID is %d.", s.String(), os.Getpid()))
+								logger.Info(fmt.Sprintf("Ignoring %s signal. PID is %d.", s.String(), os.Getpid()))
 								continue
 							} else {
 								logger.Info(fmt.Sprintf("Received %s signal. Shutting down.", s.String()))
@@ -161,15 +164,20 @@ func main() {
 						logger.Error("No projects defined in configuration file. Exiting.")
 						os.Exit(404)
 					} else {
-						for _, project = range projects {
-							checkProject()
-							// sleep for sleepMinutes minutes
-							sleepMinutes := conf.GetInt("settings.sleepMinutes")
-							if sleepMinutes == 0 {
-								sleepMinutes = defaultSleepMinutes
+						sleepMinutes := defaultSleepMinutes
+						if conf.IsSet("settings.sleepMinutes") {
+							if sleepMinutes, err = time.ParseDuration(spf("%fm", conf.GetFloat64("settings.sleepMinutes"))); err != nil {
+								logger.Error(spf("Error parsing sleepMinutes: %s. Exiting.", err.Error()))
+								os.Exit(3)
 							}
-							logger.Debug(spf("Sleeping for %d minutes.", sleepMinutes))
-							time.Sleep(time.Duration(sleepMinutes) * time.Minute)
+						}
+						for { // infinite loop
+							for _, project = range projects {
+								checkProject()
+							}
+							// Sleep for sleepMinutes
+							logger.Debug(spf("Sleeping for %s.", sleepMinutes.String()))
+							time.Sleep(time.Duration(sleepMinutes))
 						}
 					}
 				}
