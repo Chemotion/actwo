@@ -14,6 +14,7 @@ import (
 
 type Project struct { // alphabetical order
 	Depends_On  []string `mapstructure:"depends_on"`
+	End         []string `mapstructure:"end"`
 	Environment []string `mapstructure:"environment"`
 	Kill        []string `mapstructure:"kill"`
 	Run         []string `mapstructure:"run"`
@@ -90,6 +91,9 @@ func runProject(p *Project, name string, meta *map[string]string) (err error) {
 		if len(conf.GetStringSlice("projects."+dependecy+".depends_on")) != 0 {
 			logger.Debug(spf("Local dependencies for dependency project %s are being ignored", dependecy)) // ignoring local dependencies
 		}
+		if len(conf.GetStringSlice("projects."+dependecy+".end")) != 0 {
+			logger.Debug(spf("Local end commands for dependency project %s are being ignored", dependecy)) // ignoring local dependencies
+		}
 		if len(conf.GetStringSlice("projects."+dependecy+".kill")) != 0 {
 			copy(kill, conf.GetStringSlice("projects."+dependecy+".kill")) // copy the kill commands
 			logger.Debug(spf("Kill commands replaced with those of the dependency project %s.", dependecy))
@@ -110,7 +114,13 @@ func runProject(p *Project, name string, meta *map[string]string) (err error) {
 		environ = append(environ, os.Environ()...) // add add the current environment so as to override the configuration
 		// run the main commands
 		logger.Debug(spf("Environment for project %s is: %v", name, environ))
-		err = runCommands(p.Run, environ)
+		if err = runCommands(p.Run, environ); err == nil {
+			logger.Debug(spf("Now running the end phase for project %s.", name))
+			if err = runCommands(p.End, environ); err != nil {
+				logger.Info(spf("Ran project %s successfully.", name))
+				logger.Error(spf("Error running end commands for the project %s: %s", name, err.Error()))
+			}
+		}
 	}
 	return err
 }
