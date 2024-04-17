@@ -14,7 +14,7 @@ import (
 
 type Project struct { // alphabetical order
 	Depends_On  []string `mapstructure:"depends_on"`
-	End         []string `mapstructure:"end"`
+	Clean_Up    []string `mapstructure:"Clean_Up"`
 	Environment []string `mapstructure:"environment"`
 	Kill        []string `mapstructure:"kill"`
 	Run         []string `mapstructure:"run"`
@@ -47,6 +47,34 @@ func evaluateRelease(value string) (meta map[string]string, err error) {
 		}
 	}
 	// meta has the following keys: runIt, owner, repo, old, new, env_0, env_1, ...
+	return meta, err
+}
+
+func evaluatePush(value string) (meta map[string]string, err error) {
+	meta = make(map[string]string)
+	meta["runIt"] = "false"
+	meta["owner"], value, _ = strings.Cut(value, "/")
+	meta["repo"], value, _ = strings.Cut(value, "/")
+	meta["branch"], meta["old"], _ = strings.Cut(value, "/")
+	meta["new"] = meta["old"]
+	var commits []*api_gh.RepositoryCommit
+	var options api_gh.CommitsListOptions
+	options.SHA, options.Page, options.PerPage = meta["branch"], 1, 1
+	if commits, _, err = client.Repositories.ListCommits(context.Background(), meta["owner"], meta["repo"], &options); err != nil {
+		err = fmt.Errorf("error getting latest commit for %s/%s/%s: %s", meta["owner"], meta["repo"], meta["branch"], err.Error())
+	} else {
+		meta["new"] = (*commits[0].SHA)[:7]
+		if strings.HasPrefix(meta["new"], meta["old"]) {
+			logger.Debug(spf("New commit %s is the same as old commit %s.", meta["new"], meta["old"]))
+			meta["runIt"] = "false"
+		} else {
+			logger.Debug(spf("New commit %s is different from old commit %s.", meta["new"], meta["old"]))
+			meta["runIt"] = "true"
+			meta["env_0"] = spf("VERSION=%s", meta["new"])
+			meta["env_1"] = spf("TAG_NAME=%s", meta["new"])
+		}
+	}
+	// meta has the following keys: runIt, owner, repo, branch, old, new, env_0, env_1, ...
 	return meta, err
 }
 
@@ -91,8 +119,8 @@ func runProject(p *Project, name string, meta *map[string]string) (err error) {
 		if len(conf.GetStringSlice("projects."+dependecy+".depends_on")) != 0 {
 			logger.Debug(spf("Local dependencies for dependency project %s are being ignored", dependecy)) // ignoring local dependencies
 		}
-		if len(conf.GetStringSlice("projects."+dependecy+".end")) != 0 {
-			logger.Debug(spf("Local end commands for dependency project %s are being ignored", dependecy)) // ignoring local dependencies
+		if len(conf.GetStringSlice("projects."+dependecy+".clean_up")) != 0 {
+			logger.Debug(spf("Local clean_up commands for dependency project %s are being ignored", dependecy)) // ignoring local dependencies
 		}
 		if len(conf.GetStringSlice("projects."+dependecy+".kill")) != 0 {
 			copy(kill, conf.GetStringSlice("projects."+dependecy+".kill")) // copy the kill commands
@@ -114,12 +142,10 @@ func runProject(p *Project, name string, meta *map[string]string) (err error) {
 		environ = append(environ, os.Environ()...) // add add the current environment so as to override the configuration
 		// run the main commands
 		logger.Debug(spf("Environment for project %s is: %v", name, environ))
-		if err = runCommands(p.Run, environ); err == nil {
-			logger.Debug(spf("Now running the end phase for project %s.", name))
-			if err = runCommands(p.End, environ); err != nil {
-				logger.Info(spf("Ran project %s successfully.", name))
-				logger.Error(spf("Error running end commands for the project %s: %s", name, err.Error()))
-			}
+		err = runCommands(p.Run, environ)
+		if errCleanUp := runCommands(p.Clean_Up, environ); errCleanUp != nil {
+			logger.Debug(spf("Now running the clean up phase for project %s.", name))
+			logger.Error(spf("Error running clean up commands for the project %s: %s", name, errCleanUp.Error()))
 		}
 	}
 	return err
@@ -139,12 +165,15 @@ func checkTriggers(project string) {
 			trigger, value, _ := strings.Cut(t, "=")
 			trigger = strings.TrimSpace(strings.ToLower(trigger)) // normalize the trigger
 			switch trigger {
-			case "always":
-				logger.Info(spf("Running %s for %s.", trigger, project))
-			case "release":
-				// get the latest value
-				logger.Debug(spf("Getting latest release for %s...", project))
-				if meta, err = evaluateRelease(value); err != nil {
+			case "release", "push":
+				logger.Debug(spf("Getting latest %s for %s...", trigger, project))
+				switch trigger {
+				case "release":
+					meta, err = evaluateRelease(value)
+				case "push":
+					meta, err = evaluatePush(value)
+				}
+				if err != nil {
 					if strings.Contains(err.Error(), "rate limit") || strings.Contains(err.Error(), "abuse detection") {
 						logger.Error(spf("You are being limited blocked by the GH API with error %s. Sleeping for %s...", err.Error(), defaultSleepMinutes.String()))
 						time.Sleep(defaultSleepMinutes) // sleep for defaultSleepMinutes minutes
@@ -154,7 +183,7 @@ func checkTriggers(project string) {
 					continue
 				} else {
 					if meta["runIt"] == "false" {
-						logger.Info(spf("Not running %s for %s because a newer release was not found.", trigger, project))
+						logger.Info(spf("Not running %s for %s because a new %s was not found.", trigger, project, trigger))
 						continue
 					}
 				}
@@ -167,10 +196,11 @@ func checkTriggers(project string) {
 			} else {
 				logger.Info(spf("Ran trigger called %s for %s successfully.", trigger, project))
 				switch trigger {
-				case "always": // nothing to do
+				// replace the existing entry from triggers
 				case "release":
-					// replace the existing entry from triggers
 					p.Triggers[index] = spf("release=%s/%s/%s", meta["owner"], meta["repo"], meta["new"])
+				case "push":
+					p.Triggers[index] = spf("push=%s/%s/%s/%s", meta["owner"], meta["repo"], meta["branch"], meta["new"])
 				}
 				// write the new configuration
 				conf.Set("projects."+project, p)
