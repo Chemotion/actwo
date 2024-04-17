@@ -129,7 +129,13 @@ func main() {
 					logger.Debug(spf("Log file %s opened successfully.", l.Name()))
 					// check if the configuration file is locked
 					if *unlock { // unlock the configuration file and exit
-						unlockConfig()
+						if err = lockConfig(0); err != nil {
+							logger.Error(fmt.Sprintf("Error unlocking configuration file (%s): %s. Exiting.", conf.ConfigFileUsed(), err.Error()))
+							os.Exit(212) // 212 is the exit code when unlocking fails
+						} else {
+							logger.Info("Exiting gracefully.")
+							os.Exit(0) // exit successfully
+						}
 					}
 					logger.Debug(spf("Configuration file (%s) opened successfully.", conf.ConfigFileUsed()))
 					// Lock the configuration file

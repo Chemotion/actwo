@@ -16,7 +16,6 @@ type Project struct { // alphabetical order
 	Depends_On  []string `mapstructure:"depends_on"`
 	Clean_Up    []string `mapstructure:"Clean_Up"`
 	Environment []string `mapstructure:"environment"`
-	Kill        []string `mapstructure:"kill"`
 	Run         []string `mapstructure:"run"`
 	Triggers    []string `mapstructure:"triggers"`
 }
@@ -86,6 +85,7 @@ func runCommands(commands []string, environ []string) (err error) {
 		logger.Debug(spf("Running command: %s", command))
 		command = strings.TrimSpace(command)
 		c := strings.Split(command, " ")
+		runner = new(exec.Cmd) // reset the runner
 		runner = exec.Command(c[0], c[1:]...)
 		runner.Env = environ
 		runner.Stdin, runner.Stdout, runner.Stderr = nil, os.Stdout, os.Stderr
@@ -96,9 +96,12 @@ func runCommands(commands []string, environ []string) (err error) {
 			logger.Debug(spf("Successfully started command: %s", command))
 			if err = runner.Wait(); err != nil {
 				err = fmt.Errorf("error running command %s: %s", command, err.Error())
+				if runner.ProcessState != nil {
+					logger.Debug(spf("Took %s to fail running command: %s", (runner.ProcessState.SystemTime() + runner.ProcessState.UserTime()).String(), command))
+				}
 				break // break immediately
 			} else {
-				logger.Debug(spf("Successfully ran command: %s", command))
+				logger.Debug(spf("Took %s to successfully ran command: %s", (runner.ProcessState.SystemTime() + runner.ProcessState.UserTime()).String(), command))
 			}
 		}
 	}
@@ -107,7 +110,7 @@ func runCommands(commands []string, environ []string) (err error) {
 
 func runProject(p *Project, name string, meta *map[string]string) (err error) {
 	environ := []string{}
-	copy(kill, p.Kill)        // copy the kill commands
+	kill = p.Clean_Up         // copy the kill commands
 	for k, v := range *meta { // add env_ data from meta as environment
 		if strings.HasPrefix(k, "env_") {
 			environ = append(environ, v)
@@ -123,10 +126,7 @@ func runProject(p *Project, name string, meta *map[string]string) (err error) {
 			logger.Debug(spf("Local dependencies for dependency project %s are being ignored", dependecy)) // ignoring local dependencies
 		}
 		if len(conf.GetStringSlice("projects."+dependecy+".clean_up")) != 0 {
-			logger.Debug(spf("Local clean_up commands for dependency project %s are being ignored", dependecy)) // ignoring local dependencies
-		}
-		if len(conf.GetStringSlice("projects."+dependecy+".kill")) != 0 {
-			copy(kill, conf.GetStringSlice("projects."+dependecy+".kill")) // copy the kill commands
+			kill = conf.GetStringSlice("projects." + dependecy + ".clean_up") // copy the kill commands
 			logger.Debug(spf("Kill commands replaced with those of the dependency project %s.", dependecy))
 		}
 		dependentEnv := append(environ, conf.GetStringSlice("projects."+dependecy+".environment")...) // add the environment as given in the configuration for the depemdent project
@@ -139,18 +139,21 @@ func runProject(p *Project, name string, meta *map[string]string) (err error) {
 			logger.Info(spf("Ran dependecy %s for project %s successfully.", dependecy, name))
 		}
 	}
+	kill = p.Clean_Up // copy the kill commands
+	logger.Debug(spf("Kill commands set to those of the project %s.", name))
 	if err == nil {
-		copy(kill, p.Kill) // copy the kill commands
-		logger.Debug(spf("Kill commands set to those of the project %s.", name))
 		environ = append(environ, os.Environ()...) // add add the current environment so as to override the configuration
 		// run the main commands
 		logger.Debug(spf("Environment for project %s is: %v", name, environ))
-		err = runCommands(p.Run, environ)
-		if errCleanUp := runCommands(p.Clean_Up, environ); errCleanUp != nil {
+		if err = runCommands(p.Run, environ); err == nil || err.Error() != "signal: killed" { // run the clean up commands for the triggered project if it was not killed
 			logger.Debug(spf("Now running the clean up phase for project %s.", name))
-			logger.Error(spf("Error running clean up commands for the project %s: %s", name, errCleanUp.Error()))
+			if errCleanUp := runCommands(p.Clean_Up, environ); errCleanUp != nil {
+				logger.Error(spf("Error running clean up commands for the project %s: %s", name, errCleanUp.Error()))
+			}
 		}
 	}
+	kill = []string{} // reset the kill commands
+	logger.Debug("Kill commands reset.")
 	return err
 }
 

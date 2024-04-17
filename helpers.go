@@ -48,18 +48,6 @@ func lockConfig(proposed int) (err error) {
 	return err
 }
 
-// run the unlock sequence
-func unlockConfig() {
-	if ok := lockConfig(0); ok != nil {
-		logger.Error(spf("Error unlocking configuration file (%s). Exiting.", conf.ConfigFileUsed()))
-		os.Exit(212) // 212 is the exit code when unlocking fails
-	} else {
-		logger.Debug(spf("Configuration file (%s) unlocked successfully.", conf.ConfigFileUsed()))
-		logger.Info("Exiting gracefully.")
-		os.Exit(0) // unlock and exit
-	}
-}
-
 // run the shutdown sequence
 func shutdown() {
 	// stop any command if running
@@ -68,8 +56,17 @@ func shutdown() {
 		if err := runner.Process.Kill(); err != nil {
 			logger.Error(spf("Error stopping running command: %s", err.Error()))
 		}
-		runCommands(kill, []string{}) // run the kill commands
 	}
+	// terminate any running project
+	logger.Debug("Cleaning-up any running project.")
+	runCommands(kill, []string{}) // run the kill commands
 	// unlock the configuration file and exit
-	unlockConfig()
+	if err := lockConfig(0); err != nil {
+		logger.Error(spf("Error unlocking configuration file (%s): %s. Exiting.", conf.ConfigFileUsed(), err.Error()))
+		os.Exit(212) // 212 is the exit code when unlocking fails
+	} else {
+		logger.Debug(spf("Configuration file (%s) unlocked successfully.", conf.ConfigFileUsed()))
+		logger.Info("Exiting gracefully.")
+		os.Exit(0) // exit successfully
+	}
 }
