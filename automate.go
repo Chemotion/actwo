@@ -118,25 +118,25 @@ func runProject(p *Project, name string, meta *map[string]string) (err error) {
 	}
 	environ = append(environ, p.Environment...) // add the environment as given in the configuration for the triggered project
 	// run any dependencies first
-	for _, dependecy := range p.Depends_On {
-		if len(conf.GetStringSlice("projects."+dependecy+".triggers")) != 0 {
-			logger.Debug(spf("Local triggers for dependency project %s are being ignored", dependecy)) // ignoring local triggers
+	for _, dependency := range p.Depends_On {
+		if len(conf.GetStringSlice("projects."+dependency+".triggers")) != 0 {
+			logger.Debug(spf("Local triggers for dependency project %s are being ignored", dependency)) // ignoring local triggers
 		}
-		if len(conf.GetStringSlice("projects."+dependecy+".depends_on")) != 0 {
-			logger.Debug(spf("Local dependencies for dependency project %s are being ignored", dependecy)) // ignoring local dependencies
+		if len(conf.GetStringSlice("projects."+dependency+".depends_on")) != 0 {
+			logger.Debug(spf("Local dependencies for dependency project %s are being ignored", dependency)) // ignoring local dependencies
 		}
-		if len(conf.GetStringSlice("projects."+dependecy+".clean_up")) != 0 {
-			kill = conf.GetStringSlice("projects." + dependecy + ".clean_up") // copy the kill commands
-			logger.Debug(spf("Kill commands replaced with those of the dependency project %s.", dependecy))
+		if len(conf.GetStringSlice("projects."+dependency+".clean_up")) != 0 {
+			kill = conf.GetStringSlice("projects." + dependency + ".clean_up") // copy the kill commands
+			logger.Debug(spf("Kill commands replaced with those of the dependency project %s.", dependency))
 		}
-		dependentEnv := append(environ, conf.GetStringSlice("projects."+dependecy+".environment")...) // add the environment as given in the configuration for the depemdent project
-		dependentEnv = append(dependentEnv, os.Environ()...)                                          // then add the current environment so as to override the configuration
-		logger.Debug(spf("Environment for the dependency %s is: %v", dependecy, dependentEnv))
-		if err = runCommands(conf.GetStringSlice("projects."+dependecy+".run"), dependentEnv); err != nil {
-			logger.Error(spf("Error running dependency %s for project %s: %s", dependecy, name, err.Error()))
+		dependentEnv := append(environ, conf.GetStringSlice("projects."+dependency+".environment")...) // add the environment as given in the configuration for the depemdent project
+		dependentEnv = append(dependentEnv, os.Environ()...)                                           // then add the current environment so as to override the configuration
+		logger.Debug(spf("Environment for the dependency %s is: %v", dependency, dependentEnv))
+		if err = runCommands(conf.GetStringSlice("projects."+dependency+".run"), dependentEnv); err != nil {
+			logger.Error(spf("Error running dependency %s for project %s: %s", dependency, name, err.Error()))
 			break
 		} else {
-			logger.Info(spf("Ran dependecy %s for project %s successfully.", dependecy, name))
+			logger.Info(spf("Ran dependency %s for project %s successfully.", dependency, name))
 		}
 	}
 	kill = p.Clean_Up // copy the kill commands
