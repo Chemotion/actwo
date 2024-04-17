@@ -62,6 +62,9 @@ func evaluatePush(value string) (meta map[string]string, err error) {
 	options.SHA, options.Page, options.PerPage = meta["branch"], 1, 1
 	if commits, _, err = client.Repositories.ListCommits(context.Background(), meta["owner"], meta["repo"], &options); err != nil {
 		err = fmt.Errorf("error getting latest commit for %s/%s/%s: %s", meta["owner"], meta["repo"], meta["branch"], err.Error())
+		if strings.Contains(err.Error(), "404 Not Found") {
+			err = fmt.Errorf("error getting latest commit for %s/%s/%s: %s", meta["owner"], meta["repo"], meta["branch"], "branch not found")
+		}
 	} else {
 		meta["new"] = (*commits[0].SHA)[:7]
 		if strings.HasPrefix(meta["new"], meta["old"]) {
