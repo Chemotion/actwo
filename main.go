@@ -36,6 +36,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"os/signal"
 	"syscall"
 	"time"
@@ -67,12 +68,12 @@ var (
 	logger slog.Logger
 	// sigs is the signal channel
 	sigs chan os.Signal
-	// the project that is currently selected
-	project string
-	// is the build process for the project running
-	running bool
 	// client for the github API
 	client *api_gh.Client = api_gh.NewClient(nil)
+	// runner is the command runner
+	runner *exec.Cmd
+	// kill is the commands to kill the current runner
+	kill []string
 )
 
 /*
@@ -168,8 +169,8 @@ func main() {
 							os.Exit(404) // 404 is the exit code when no projects are defined
 						} else {
 							for { // infinite loop
-								for _, project = range projects {
-									checkProject()
+								for _, project := range projects {
+									checkTriggers(project)
 								}
 								// Sleep for sleepMinutes
 								logger.Debug(spf("Sleeping for %s.", sleepMinutes.String()))

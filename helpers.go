@@ -27,10 +27,10 @@ func lockConfig(proposed int) (err error) {
 	current := conf.GetInt("settings.locked")
 	if proposed != 0 && current != 0 && current != proposed {
 		logger.Debug(spf("Previous lock was not unset properly (PID: %d).", current))
-		var p *os.Process
-		p, err = os.FindProcess(current) // On Unix systems, FindProcess always succeeds and returns a Process for the given pid, regardless of whether the process exists.
+		var process *os.Process
+		process, err = os.FindProcess(current) // On Unix systems, FindProcess always succeeds and returns a Process for the given pid, regardless of whether the process exists.
 		if err == nil {
-			if err = p.Signal(syscall.Signal(0)); err == nil {
+			if err = process.Signal(syscall.Signal(0)); err == nil {
 				err = fmt.Errorf("process %d is still running", current)
 			} else if err.Error() == "os: process already finished" {
 				err = nil
@@ -48,19 +48,6 @@ func lockConfig(proposed int) (err error) {
 	return err
 }
 
-// run the cleanup sequence
-func cleanup() {
-	cleanup := conf.GetStringSlice("projects." + project + ".cleanup")
-	// run the cleanup commands
-	for _, command := range cleanup {
-		logger.Debug(spf("Running cleanup command: %s", command))
-		if err := runCommand(command); err != nil {
-			logger.Error(spf("Error running cleanup command %s: %s", command, err.Error()))
-			break
-		}
-	}
-}
-
 // run the unlock sequence
 func unlockConfig() {
 	if ok := lockConfig(0); ok != nil {
@@ -75,8 +62,13 @@ func unlockConfig() {
 
 // run the shutdown sequence
 func shutdown() {
-	if running {
-		cleanup()
+	// stop any command if running
+	if runner != nil && runner.ProcessState == nil {
+		logger.Info(spf("Stopping running command: %s.", runner.String()))
+		if err := runner.Process.Kill(); err != nil {
+			logger.Error(spf("Error stopping running command: %s", err.Error()))
+		}
+		runCommands(kill, []string{}) // run the kill commands
 	}
 	// unlock the configuration file and exit
 	unlockConfig()
